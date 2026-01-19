@@ -1,0 +1,63 @@
+"""
+Worker threads for background tasks
+Phase 1.1.4: 後台任務線程
+"""
+
+import logging
+from typing import Dict, Optional
+
+from PyQt5.QtCore import QThread, pyqtSignal
+
+from core.audio.separator import AudioSeparator
+
+logger = logging.getLogger(__name__)
+
+
+class SeparationWorker(QThread):
+    """音源分離工作線程"""
+    
+    # 信號
+    progress = pyqtSignal(int)  # 進度百分比 (0-100)
+    message = pyqtSignal(str)   # 狀態訊息
+    finished = pyqtSignal(dict) # 完成，返回 stems 字典
+    error = pyqtSignal(str)     # 錯誤訊息
+    
+    def __init__(self, video_path: str, output_dir: str):
+        super().__init__()
+        self.video_path = video_path
+        self.output_dir = output_dir
+        self.separator = None
+    
+    def run(self):
+        """執行分離"""
+        try:
+            self.message.emit("Initializing audio separator...")
+            self.progress.emit(5)
+            
+            self.separator = AudioSeparator()
+            
+            self.message.emit("Processing video...")
+            self.progress.emit(20)
+            
+            # 進行分離
+            stems = self.separator.process_video(self.video_path, self.output_dir)
+            
+            self.progress.emit(100)
+            self.message.emit("Separation complete!")
+            self.finished.emit(stems)
+        
+        except Exception as e:
+            logger.error(f"Separation error: {e}")
+            self.error.emit(str(e))
+            self.progress.emit(0)
+
+
+if __name__ == "__main__":
+    import sys
+    from PyQt5.QtWidgets import QApplication
+    
+    app = QApplication(sys.argv)
+    # 測試：worker = SeparationWorker("test.mp4", "output")
+    # worker.finished.connect(print)
+    # worker.start()
+    sys.exit(app.exec_())
