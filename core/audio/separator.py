@@ -1,24 +1,19 @@
 """
-Audio separator using Demucs model
-Phase 1.2: 去除人聲伴奏提取 - 簡化版
+音源分離（Demucs）
+Phase 1.1.2: 影片上傳與音源分離
 
-策略：
-1. 分離音訊為 vocal 軌
-2. 計算 accompaniment = original_audio - vocal
-3. 直接輸出單個伴奏 WAV
-
-優點：
-- 時間長度正確（等於原始音訊）
-- 音樂完整（all frequencies preserved）
-- 人聲去除乾淨
-- 簡單穩定
+作用：
+- 從影片讀取音訊
+- 產出四軌 stems（vocal/drums/bass/other）
 """
 
 import os
 import logging
-from typing import Tuple
+from typing import Dict, Tuple
 
 import numpy as np
+
+import config
 
 try:
     import librosa
@@ -37,207 +32,213 @@ logger = logging.getLogger(__name__)
 
 
 class AudioSeparator:
-    """音源分離 - 提取伴奏軌"""
+    """音源分離器 - 產出音訊檔案"""
 
-    def __init__(self, model_name: str = 'htdemucs'):
-        """
-        初始化
-        
-        Args:
-            model_name: Demucs 模型名稱
-        """
+    def __init__(self, model_name: str = config.DEMUCS_MODEL):
+        # 模型名稱
         self.model_name = model_name
+        # Demucs 模型實例
         self.model = None
+        # 運算裝置（CPU/GPU）
         self.device = None
         logger.info(f"Initializing AudioSeparator with model: {model_name}")
 
     def _load_model(self):
-        """延遲加載模型"""
+        """延遲載入 Demucs 模型"""
         if self.model is not None:
             return
-        
+
         logger.info(f"Loading Demucs model: {self.model_name}")
         try:
+            # 裝置選擇
             self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
             logger.info(f"Using device: {self.device}")
-            
+
+            # 載入模型
             self.model = get_model(self.model_name)
             self.model = self.model.to(self.device)
             self.model.eval()
-            
+
             logger.info(f"Model loaded successfully on {self.device}")
-            
-        except Exception as e:
-            logger.error(f"Failed to load model: {e}")
+        except Exception as exc:
+            logger.error(f"Failed to load model: {exc}")
             raise
 
-    def separate(self, video_path: str) -> Tuple[np.ndarray, int]:
-        """
-        分離音訊並提取伴奏軌
-        
-        策略：original_audio - vocal = accompaniment
-        
-        Args:
-            video_path: MP4 文件路徑
-        
-        Returns:
-            (伴奏音訊, 採樣率)
-        """
+    def _load_audio(self, video_path: str) -> Tuple[np.ndarray, int]:
+        """從影片讀取音訊（保持原始取樣率）"""
+        # 讀取音訊（mono=False 以保留聲道資訊）
+        audio, sample_rate = librosa.load(video_path, sr=None, mono=False)
+        # 單聲道時轉為 (1, samples)
+        if audio.ndim == 1:
+            audio = np.expand_dims(audio, axis=0)
+        return audio, sample_rate
+
+    def _map_source_name(self, source: str) -> str:
+        """統一 stems 名稱（vocals -> vocal）"""
+        if source == 'vocals':
+            return 'vocal'
+        if source == 'vocal':
+            return 'vocal'
+        return source
+
+    def _separate_audio(self, audio: np.ndarray, sample_rate: int) -> Tuple[Dict[str, np.ndarray], int]:
+        """分離音源（使用已讀取音訊）"""
         self._load_model()
-        
-        # 提取音訊 (單聲道)
-        logger.info(f"Extracting audio from: {video_path}")
+
+        # 轉為 torch tensor（batch=1）
+        audio_tensor = torch.from_numpy(audio).float().unsqueeze(0)  # 音訊張量
+
+        # Demucs 目標參數
+        target_sr = getattr(self.model, 'samplerate', 44100)  # 目標取樣率
+        target_channels = getattr(self.model, 'audio_channels', 2)  # 目標聲道數
+
+        # 轉為 Demucs 標準格式
+        audio_tensor = convert_audio(audio_tensor, sample_rate, target_sr, target_channels)
+        audio_tensor = audio_tensor.to(self.device)
+
+        # 執行分離
+        logger.info("Starting separation...")
+        with torch.no_grad():
+            stems_tensor = apply_model(self.model, audio_tensor)  # 分離結果張量
+
+        # 轉為 numpy
+        stems: Dict[str, np.ndarray] = {}  # stems 音源字典
+        sources = list(getattr(self.model, 'sources', []))  # stems 名稱列表
+        for index, source in enumerate(sources):
+            # 單一 stem：形狀 (channels, samples)
+            stem_audio = stems_tensor[0, index].cpu().numpy()  # 單一 stem 音訊
+            stem_key = self._map_source_name(source)  # stems key
+            stems[stem_key] = stem_audio
+
+        logger.info("Separation complete: stems=%s", list(stems.keys()))
+        return stems, target_sr
+
+    def separate(self, video_path: str) -> Tuple[Dict[str, np.ndarray], int]:
+        """
+        分離音源並回傳 stems
+
+        Args:
+            video_path: 影片檔案路徑
+
+        Returns:
+            (stems, sample_rate)
+        """
+        # 檢查檔案存在
         if not os.path.exists(video_path):
             raise FileNotFoundError(f"Video file not found: {video_path}")
-        
-        try:
-            # 讀取原始音訊 (保留所有資訊)
-            audio, sr = librosa.load(video_path, sr=None, mono=True)
-            original_audio = audio.copy()
-            
-            logger.info(f"Original audio: shape={audio.shape}, sr={sr}, duration={len(audio)/sr:.2f}s")
-            
-            # 轉為 torch tensor
-            audio_tensor = torch.from_numpy(audio).float()
-            audio_tensor = audio_tensor.unsqueeze(0).unsqueeze(0)  # (1, 1, samples)
-            
-            logger.info(f"Tensor shape before convert: {audio_tensor.shape}")
-            
-            # 轉為 Demucs 標準格式 (16kHz, 2 channel)
-            audio_tensor = convert_audio(
-                audio_tensor,
-                sr,              # 原始採樣率
-                16000,           # Demucs 標準採樣率
-                2                # Demucs 標準通道數
-            )
-            
-            audio_tensor = audio_tensor.to(self.device)
-            
-            logger.info(f"Tensor shape after convert: {audio_tensor.shape}")
-            
-            # 使用 Demucs 分離
-            logger.info("Starting vocal separation...")
-            with torch.no_grad():
-                # stems: (batch=1, stems=4, channels=2, samples)
-                # stems[0, 0] = vocal channel
-                stems = apply_model(self.model, audio_tensor)
-            
-            # 提取 vocal 軌 (index 0)
-            vocal_stereo = stems[0, 0]  # (2, samples) @ 16kHz
-            
-            # 取左聲道或平均
-            if vocal_stereo.shape[0] == 2:
-                vocal = vocal_stereo.mean(dim=0)  # 立體聲轉單聲道
-            else:
-                vocal = vocal_stereo.squeeze()
-            
-            vocal = vocal.cpu().detach().numpy()
-            
-            logger.info(f"Vocal extracted: shape={vocal.shape} @ 16kHz")
-            
-            # 重新採樣到原始採樣率
-            vocal = librosa.resample(
-                vocal,
-                orig_sr=16000,
-                target_sr=sr
-            )
-            
-            logger.info(f"Vocal resampled: shape={vocal.shape} @ {sr}Hz")
-            
-            # 確保長度對齊
-            min_len = min(len(original_audio), len(vocal))
-            original_audio = original_audio[:min_len]
-            vocal = vocal[:min_len]
-            
-            # 計算伴奏 = 原始 - 人聲
-            # 乘以 0.95 是因為 vocal 可能會過估，預留一點空間
-            accompaniment = original_audio - vocal * 0.95
-            
-            # 正規化 (防止爆音)
-            max_val = np.max(np.abs(accompaniment))
-            if max_val > 1.0:
-                accompaniment = accompaniment / max_val * 0.95
-            
-            logger.info(f"Accompaniment: shape={accompaniment.shape}, max={np.max(np.abs(accompaniment)):.4f}")
-            logger.info(f"Duration: {len(accompaniment)/sr:.2f}s (vs original {len(original_audio)/sr:.2f}s)")
-            
-            return accompaniment, sr
-        
-        except Exception as e:
-            logger.error(f"Separation failed: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
-            raise
 
-    def save_accompaniment(self, accompaniment: np.ndarray, sr: int, output_path: str):
-        """
-        保存伴奏為 WAV 檔
-        
-        Args:
-            accompaniment: 伴奏音訊陣列
-            sr: 採樣率
-            output_path: 輸出路徑 (自動加上 .wav 副檔名)
-        """
-        # 確保有副檔名
-        if not output_path.endswith('.wav'):
-            output_path = output_path + '.wav'
-            logger.info(f"Auto-appending .wav extension: {output_path}")
-        
-        output_dir = os.path.dirname(output_path)
-        if output_dir:
-            os.makedirs(output_dir, exist_ok=True)
-            logger.info(f"Created output directory: {output_dir}")
-        
-        logger.info(f"Saving accompaniment to: {output_path}")
-        
-        try:
-            # 驗證數據
-            if np.isnan(accompaniment).any() or np.isinf(accompaniment).any():
-                logger.warning("Found NaN/Inf values in audio, replacing with zeros")
-                accompaniment = np.nan_to_num(accompaniment, nan=0.0, posinf=1.0, neginf=-1.0)
-            
-            # 轉為 int16
-            accompaniment_int16 = np.clip(accompaniment * 32767, -32768, 32767).astype(np.int16)
-            
-            logger.info(f"Converting to int16: min={accompaniment_int16.min()}, max={accompaniment_int16.max()}")
-            
-            # 保存
-            sf.write(output_path, accompaniment_int16, sr)
-            
-            logger.info(f"Saved successfully: {output_path}")
-            file_size_mb = os.path.getsize(output_path) / 1024 / 1024
-            logger.info(f"File size: {file_size_mb:.2f} MB")
-            
-        except Exception as e:
-            logger.error(f"Failed to save: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
-            raise
+        # 讀取音訊
+        audio, sample_rate = self._load_audio(video_path)  # 音訊資料與取樣率
+        logger.info(
+            "Audio loaded: shape=%s, sr=%s, duration=%.2fs",
+            audio.shape,
+            sample_rate,
+            audio.shape[-1] / sample_rate,
+        )
+        return self._separate_audio(audio, sample_rate)
 
-    def process_video(self, video_path: str, output_path: str) -> str:
+    def _save_audio(self, audio: np.ndarray, sample_rate: int, output_path: str):
+        """保存音訊檔案"""
+        # 轉換為 (samples, channels)
+        audio_to_save = audio
+        if audio_to_save.ndim == 2:
+            audio_to_save = audio_to_save.T
+        sf.write(output_path, audio_to_save, sample_rate)
+
+    def save_stems(self, stems: Dict[str, np.ndarray], sample_rate: int, output_dir: str) -> Dict[str, str]:
         """
-        完整流程：提取 → 分離 → 保存
-        
+        保存 stems 為 WAV 檔
+
         Args:
-            video_path: 輸入 MP4 路徑
-            output_path: 輸出路徑 (自動加上 .wav 副檔名)
-        
+            stems: 音源字典
+            sample_rate: 取樣率
+            output_dir: 輸出資料夾
+
         Returns:
-            輸出檔案路徑
+            stems_paths: 儲存路徑字典
         """
-        logger.info(f"Processing video: {video_path}")
-        logger.info(f"Output path (before auto-extension): {output_path}")
-        
-        # 分離
-        accompaniment, sr = self.separate(video_path)
-        
-        # 保存
-        self.save_accompaniment(accompaniment, sr, output_path)
-        
-        # 返回最終路徑 (含副檔名)
-        final_path = output_path if output_path.endswith('.wav') else output_path + '.wav'
-        logger.info(f"Processing complete. Output: {final_path}")
-        return final_path
+        # 建立輸出目錄
+        os.makedirs(output_dir, exist_ok=True)
+
+        stems_paths: Dict[str, str] = {}  # stems 路徑字典
+        for stem_name, stem_audio in stems.items():  # stems 逐項處理
+            # 儲存路徑
+            output_path = os.path.join(output_dir, f"{stem_name}.wav")  # 輸出路徑
+
+            # 寫入檔案
+            self._save_audio(stem_audio, sample_rate, output_path)
+            stems_paths[stem_name] = output_path
+
+            logger.info("Stem saved: %s", output_path)
+
+        return stems_paths
+
+    def process_video(self, video_path: str, output_dir: str, output_options: dict) -> Dict[str, str]:
+        """
+        完整流程：分離並保存
+
+        Args:
+            video_path: 影片路徑
+            output_dir: 輸出資料夾
+
+        Returns:
+            stems_paths: 儲存路徑字典
+        """
+        # 建立輸出資料夾
+        os.makedirs(output_dir, exist_ok=True)
+
+        # 預設輸出選項
+        if not output_options:
+            output_options = {'original': True, 'music': True}  # 預設輸出
+
+        # 讀取原始音訊
+        original_audio, original_sr = self._load_audio(video_path)  # 原始音訊
+
+        # 先處理 original.wav
+        output_paths: Dict[str, str] = {}  # 輸出路徑
+        if output_options.get('original'):
+            original_path = os.path.join(output_dir, 'original.wav')
+            self._save_audio(original_audio, original_sr, original_path)
+            output_paths['original'] = original_path
+
+        # 判斷是否需要分離
+        need_separation = any(
+            output_options.get(key)
+            for key in ['music', 'vocal', 'drums', 'bass', 'other']
+        )
+        if not need_separation:
+            return output_paths
+
+        # 分離 stems
+        stems, sample_rate = self._separate_audio(original_audio, original_sr)
+
+        # 儲存選擇的 stems
+        stem_keys = ['vocal', 'drums', 'bass', 'other']
+        for key in stem_keys:
+            if output_options.get(key) and key in stems:
+                output_path = os.path.join(output_dir, f"{key}.wav")
+                self._save_audio(stems[key], sample_rate, output_path)
+                output_paths[key] = output_path
+
+        # 合成 music.wav
+        if output_options.get('music'):
+            music_audio = None  # 音樂合成音訊
+            for key in ['drums', 'bass', 'other']:
+                if key in stems:
+                    if music_audio is None:
+                        music_audio = stems[key].copy()
+                    else:
+                        music_audio = music_audio + stems[key]
+            if music_audio is not None:
+                # 正規化防止爆音
+                max_val = np.max(np.abs(music_audio))
+                if max_val > 1.0:
+                    music_audio = music_audio / max_val * 0.95
+                music_path = os.path.join(output_dir, 'music.wav')
+                self._save_audio(music_audio, sample_rate, music_path)
+                output_paths['music'] = music_path
+
+        return output_paths
 
 
 if __name__ == "__main__":
@@ -245,7 +246,6 @@ if __name__ == "__main__":
         level=logging.INFO,
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
-    
+
     separator = AudioSeparator()
-    # result = separator.process_video("input.mp4", "output/accompaniment")
-    # print(result)
+    # 測試用：separator.process_video("input.mp4", "output/stems")

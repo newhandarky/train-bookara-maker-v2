@@ -15,7 +15,7 @@ class ProgressDialog(QDialog):
     
     cancel_requested = pyqtSignal()
     
-    def __init__(self, parent=None, title="Processing"):
+    def __init__(self, parent=None, title="處理中"):
         super().__init__(parent)
         self.init_ui(title)
         self.setWindowTitle(title)
@@ -39,11 +39,11 @@ class ProgressDialog(QDialog):
         layout.addWidget(self.progress_bar)
         
         # 狀態標籤
-        self.status_label = QLabel("Starting...")
+        self.status_label = QLabel("開始處理...")
         layout.addWidget(self.status_label)
         
         # 取消按鈕
-        cancel_btn = QPushButton("Cancel")
+        cancel_btn = QPushButton("取消")
         cancel_btn.clicked.connect(self.on_cancel)
         layout.addWidget(cancel_btn)
         
@@ -66,6 +66,6 @@ if __name__ == "__main__":
     from PyQt5.QtWidgets import QApplication
     
     app = QApplication(sys.argv)
-    dialog = ProgressDialog(title="Processing Video...")
+    dialog = ProgressDialog(title="正在處理影片...")
     dialog.show()
     sys.exit(app.exec_())

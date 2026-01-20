@@ -29,7 +29,7 @@ class ImportVideoDialog(QDialog):
         super().__init__(parent)
         self.selected_file = None
         self.init_ui()
-        self.setWindowTitle("Import Video")
+        self.setWindowTitle("匯入影片")
         self.resize(500, 200)
     
     def init_ui(self):
@@ -37,7 +37,7 @@ class ImportVideoDialog(QDialog):
         layout = QVBoxLayout()
         
         # 標題
-        title = QLabel("Select MP4 Video File")
+        title = QLabel("選擇 MP4 影片檔案")
         title.setFont(QFont("Arial", 12, QFont.Bold))
         layout.addWidget(title)
         
@@ -45,25 +45,25 @@ class ImportVideoDialog(QDialog):
         file_layout = QHBoxLayout()
         self.file_path_label = QLineEdit()
         self.file_path_label.setReadOnly(True)
-        self.file_path_label.setPlaceholderText("No file selected")
-        file_layout.addWidget(QLabel("File:"))
+        self.file_path_label.setPlaceholderText("尚未選擇檔案")
+        file_layout.addWidget(QLabel("檔案："))
         file_layout.addWidget(self.file_path_label)
         layout.addLayout(file_layout)
         
         # 按鈕
         button_layout = QHBoxLayout()
         
-        browse_btn = QPushButton("Browse")
+        browse_btn = QPushButton("瀏覽")
         browse_btn.clicked.connect(self.on_browse_clicked)
         button_layout.addWidget(browse_btn)
         
         button_layout.addStretch()
         
-        ok_btn = QPushButton("OK")
+        ok_btn = QPushButton("確定")
         ok_btn.clicked.connect(self.on_ok_clicked)
         button_layout.addWidget(ok_btn)
         
-        cancel_btn = QPushButton("Cancel")
+        cancel_btn = QPushButton("取消")
         cancel_btn.clicked.connect(self.reject)
         button_layout.addWidget(cancel_btn)
         
@@ -81,7 +81,7 @@ class ImportVideoDialog(QDialog):
         """瀏覽文件"""
         file_path, _ = QFileDialog.getOpenFileName(
             self,
-            'Select MP4 File',
+            '選擇 MP4 檔案',
             '',
             'MP4 Files (*.mp4);;All Files (*)'
         )
@@ -109,14 +109,14 @@ class ImportVideoDialog(QDialog):
             
             # 檢查存在性
             if not path.exists():
-                error_msg = f"File does not exist: {file_path}"
+                error_msg = f"檔案不存在：{file_path}"
                 logger.error(error_msg)
                 self.validation_error.emit(error_msg)
                 return False
             
             # 檢查格式
             if path.suffix.lower() != '.mp4':
-                error_msg = f"Invalid format. Expected .mp4, got {path.suffix}"
+                error_msg = f"格式錯誤，需為 .mp4：{path.suffix}"
                 logger.error(error_msg)
                 self.validation_error.emit(error_msg)
                 return False
@@ -124,7 +124,7 @@ class ImportVideoDialog(QDialog):
             # 檢查大小
             file_size_mb = path.stat().st_size / (1024 * 1024)
             if file_size_mb > 500:
-                error_msg = f"File too large: {file_size_mb:.1f}MB (max 500MB)"
+                error_msg = f"檔案過大：{file_size_mb:.1f}MB（上限 500MB）"
                 logger.error(error_msg)
                 self.validation_error.emit(error_msg)
                 return False
@@ -133,7 +133,7 @@ class ImportVideoDialog(QDialog):
             return True
         
         except Exception as e:
-            error_msg = f"Validation error: {e}"
+            error_msg = f"檔案驗證失敗：{e}"
             logger.error(error_msg)
             self.validation_error.emit(error_msg)
             return False
@@ -144,7 +144,7 @@ class ImportVideoDialog(QDialog):
             self.file_selected.emit(self.selected_file)
             self.accept()
         else:
-            QMessageBox.warning(self, "Warning", "Please select a file first")
+            QMessageBox.warning(self, "提醒", "請先選擇檔案")
 
 
 if __name__ == "__main__":

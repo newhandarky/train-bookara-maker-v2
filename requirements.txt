@@ -25,3 +25,4 @@ mypy==1.4.1
 
 # Utilities
 python-dotenv==1.0.0
+pykakasi==2.2.1

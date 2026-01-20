@@ -9,6 +9,8 @@ import json
 import logging
 from pathlib import Path
 
+from core.lrc import LrcTimeline
+
 logger = logging.getLogger(__name__)
 
 
@@ -26,7 +28,7 @@ class KaraokeProject:
     stems_dir: Optional[str] = None  # 存放各軌的目錄
     
     # LRC 狀態
-    lrc_timeline: Optional[object] = None  # LrcTimeline 對象
+    lrc_timeline: Optional[LrcTimeline] = None  # LrcTimeline 對象
     lrc_file_path: Optional[str] = None
     
     # ASS 狀態

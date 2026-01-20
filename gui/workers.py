@@ -19,31 +19,36 @@ class SeparationWorker(QThread):
     # 信號
     progress = pyqtSignal(int)  # 進度百分比 (0-100)
     message = pyqtSignal(str)   # 狀態訊息
-    finished = pyqtSignal(dict) # 完成，返回 stems 字典
+    finished = pyqtSignal(dict) # 完成，返回 stems 路徑字典
     error = pyqtSignal(str)     # 錯誤訊息
     
-    def __init__(self, video_path: str, output_dir: str):
+    def __init__(self, video_path: str, output_dir: str, output_options: dict):
         super().__init__()
-        self.video_path = video_path
-        self.output_dir = output_dir
-        self.separator = None
+        self.video_path = video_path  # 影片路徑
+        self.output_dir = output_dir  # 輸出資料夾
+        self.output_options = output_options  # 輸出選項
+        self.separator = None  # 分離器
     
     def run(self):
         """執行分離"""
         try:
-            self.message.emit("Initializing audio separator...")
+            self.message.emit("初始化音訊分離器...")
             self.progress.emit(5)
             
             self.separator = AudioSeparator()
             
-            self.message.emit("Processing video...")
+            self.message.emit("處理影片中...")
             self.progress.emit(20)
             
             # 進行分離
-            stems = self.separator.process_video(self.video_path, self.output_dir)
+            stems = self.separator.process_video(
+                self.video_path,
+                self.output_dir,
+                self.output_options,
+            )  # stems 路徑字典
             
             self.progress.emit(100)
-            self.message.emit("Separation complete!")
+            self.message.emit("音訊分離完成！")
             self.finished.emit(stems)
         
         except Exception as e:
