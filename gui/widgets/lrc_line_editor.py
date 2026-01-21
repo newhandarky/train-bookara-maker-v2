@@ -29,6 +29,8 @@ class LrcLineEditor(QTableWidget):
 
     # 句子變更訊號（line_idx, text）
     line_text_changed = pyqtSignal(int, str)
+    # 游標變更訊號（line_idx, word_idx）
+    cursor_changed = pyqtSignal(int, int)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -52,14 +54,13 @@ class LrcLineEditor(QTableWidget):
     def _setup_ui(self):
         """設定表格欄位"""
         self.setFocusPolicy(Qt.StrongFocus)
-        self.setColumnCount(4)
-        self.setHorizontalHeaderLabels(['行', '時間', '顯示', '句子'])
+        self.setColumnCount(3)
+        self.setHorizontalHeaderLabels(['行', '時間', '顯示'])
         self.setColumnWidth(0, 60)
         self.setColumnWidth(1, 140)
 
         header = self.horizontalHeader()
         header.setSectionResizeMode(2, QHeaderView.Stretch)
-        header.setSectionResizeMode(3, QHeaderView.Stretch)
 
         self.verticalHeader().setDefaultSectionSize(48)
         self.verticalHeader().setVisible(False)
@@ -115,11 +116,6 @@ class LrcLineEditor(QTableWidget):
             )
             self.setCellWidget(row, 2, display_label)
 
-            # 句子文字（可編輯，純文字）
-            text_item = QTableWidgetItem(line.text)
-            text_item.setData(Qt.UserRole, ('text', line_idx))
-            self.setItem(row, 3, text_item)
-
         self._is_updating = False
         self._ensure_cursor()
         self._update_line_display(self._current_line_idx)
@@ -144,9 +140,10 @@ class LrcLineEditor(QTableWidget):
             return
         line_idx = max(0, min(line_idx, len(self.timeline.lines) - 1))
         words = self.timeline.lines[line_idx].words
-        if not words:
-            return
-        word_idx = max(0, min(word_idx, len(words) - 1))
+        if words:
+            word_idx = max(0, min(word_idx, len(words) - 1))
+        else:
+            word_idx = 0
 
         prev_line_idx = self._current_line_idx
         self._current_line_idx = line_idx
@@ -158,10 +155,11 @@ class LrcLineEditor(QTableWidget):
 
         row = self._row_map.get(self._current_line_idx)
         if row is not None:
-            self.setCurrentCell(row, 3)
+            self.setCurrentCell(row, 0)
             self.selectRow(row)
-            self.scrollToItem(self.item(row, 3))
+            self.scrollToItem(self.item(row, 0))
         self.setFocus()
+        self.cursor_changed.emit(self._current_line_idx, self._current_word_idx)
 
     def _on_item_changed(self, item: QTableWidgetItem):
         """文字變更事件"""
@@ -208,6 +206,21 @@ class LrcLineEditor(QTableWidget):
         words = self._parser.parse_txt_line(text, auto_ruby=True)
         return [LrcWord(w.text, w.start_time, w.end_time, w.ruby_pair) for w in words]
 
+    def set_line_text(self, line_idx: int, text: str):
+        """更新指定行的句子內容"""
+        if not self.timeline:
+            return
+        if line_idx < 0 or line_idx >= len(self.timeline.lines):
+            return
+        self._on_line_text_changed(line_idx, text)
+
+    def get_line_index_by_row(self, row: int) -> Optional[int]:
+        """透過列索引找出行索引"""
+        for line_idx, mapped in self._row_map.items():
+            if mapped == row:
+                return line_idx
+        return None
+
     def _update_line_display(self, line_idx: int):
         """更新行顯示"""
         if not self.timeline:
@@ -229,12 +242,7 @@ class LrcLineEditor(QTableWidget):
         if isinstance(display_label, QLabel):
             display_label.setText(self._build_ruby_html(line, line_idx))
 
-        # 更新句子文字
-        text_item = self.item(row, 3)
-        if text_item:
-            self._is_updating = True
-            text_item.setText(line.text)
-            self._is_updating = False
+        # 句子文字由外部面板處理
 
     def _update_line_time(self, line_idx: int):
         """更新行時間顯示"""

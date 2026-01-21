@@ -7,6 +7,7 @@ from .lrc_line_editor import LrcLineEditor
 from .output_options_dialog import OutputOptionsDialog
 from .ruby_edit_dialog import RubyEditDialog
 from .lyrics_timing_panel import LyricsTimingPanel
+from .preview_player import PreviewPlayer
 from .timestamp_editor import TimeStampEditor
 
 __all__ = [
@@ -16,5 +17,6 @@ __all__ = [
     'OutputOptionsDialog',
     'RubyEditDialog',
     'LyricsTimingPanel',
+    'PreviewPlayer',
     'TimeStampEditor',
 ]

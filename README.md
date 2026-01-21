@@ -15,6 +15,9 @@
 - 歌詞載入：支援 `.txt` / `.lrc`，一行一句的句子編輯
 - 句內編輯：Ruby 僅顯示在漢字上方；可用鍵盤移動字級游標並以 F2 / Ctrl+R 編輯 Ruby
 - 時間標記：播放中按空白鍵逐字標記時間軸並即時高亮當前字
+- 驗證輸出：輸出 LRC / ASS 前會先驗證，必要時可強制輸出
+- 轉換與渲染：LRC → ASS、FFmpeg 匯出 MP4
+- 預覽播放器：可預覽影片/音訊並同步顯示歌詞
 
 ## 專案結構
 
@@ -57,12 +60,12 @@ train-bookara-maker-v2/
 
 - [x] Phase 1.1：影片上傳與音源分離
 - [x] Phase 1.2：基礎 LRC 編輯器 UI
-- [ ] Phase 1.3：LRC 驗證與 I/O
-- [ ] Phase 1.4：LRC → ASS 轉換
-- [ ] Phase 1.5：FFmpeg 渲染
-- [ ] Phase 1.6：簡單預覽播放器
+- [x] Phase 1.3：LRC 驗證與 I/O
+- [x] Phase 1.4：LRC → ASS 轉換
+- [x] Phase 1.5：FFmpeg 渲染
+- [x] Phase 1.6：簡單預覽播放器
 
-目前進度：Phase 1.2（基礎 LRC 編輯器 UI）完成。
+目前進度：Phase 1.6（簡單預覽播放器）完成。
 
 詳細規劃請見 `docs/細粒度開發階段規劃2-0.md`。
 專案規範與決策請見 `docs/專案憲法2-2.md`。

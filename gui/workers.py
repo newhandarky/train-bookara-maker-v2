@@ -9,6 +9,7 @@ from typing import Dict, Optional
 from PyQt5.QtCore import QThread, pyqtSignal
 
 from core.audio.separator import AudioSeparator
+from core.video import VideoRenderer
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +55,51 @@ class SeparationWorker(QThread):
         except Exception as e:
             logger.error(f"Separation error: {e}")
             self.error.emit(str(e))
+            self.progress.emit(0)
+
+
+class RenderWorker(QThread):
+    """影片輸出工作線程"""
+
+    progress = pyqtSignal(int)  # 進度百分比 (0-100)
+    message = pyqtSignal(str)   # 狀態訊息
+    finished = pyqtSignal(str)  # 完成，回傳輸出路徑
+    error = pyqtSignal(str)     # 錯誤訊息
+
+    def __init__(self, video_path: str, audio_path: str, subtitle_path: str, output_path: str):
+        super().__init__()
+        self.video_path = video_path
+        self.audio_path = audio_path
+        self.subtitle_path = subtitle_path
+        self.output_path = output_path
+        self.renderer = VideoRenderer()
+
+    def run(self):
+        """執行輸出"""
+        try:
+            self.message.emit("開始輸出影片...")
+            self.progress.emit(0)
+
+            def on_progress(value: int):
+                self.progress.emit(value)
+
+            success = self.renderer.render(
+                self.video_path,
+                self.audio_path,
+                self.subtitle_path,
+                self.output_path,
+                progress_callback=on_progress,
+            )
+
+            if success:
+                self.progress.emit(100)
+                self.message.emit("影片輸出完成！")
+                self.finished.emit(self.output_path)
+            else:
+                self.error.emit("FFmpeg 輸出失敗")
+        except Exception as exc:
+            logger.error(f"Render error: {exc}")
+            self.error.emit(str(exc))
             self.progress.emit(0)
 
 

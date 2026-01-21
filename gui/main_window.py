@@ -6,20 +6,23 @@ Phase 1.1.4: GUI Integration
 import os
 import logging
 from pathlib import Path
+from typing import Optional
 
 from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QMessageBox, QMenuBar, QMenu, QStatusBar, QTabWidget, QStackedWidget
+    QMessageBox, QMenuBar, QMenu, QStatusBar, QTabWidget, QStackedWidget,
+    QFileDialog
 )
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QFont
 
-from pipeline.project import KaraokeProject
+from pipeline import KaraokeProject, KaraokeWorkflow
 from gui.widgets.import_dialog import ImportVideoDialog
 from gui.widgets.output_options_dialog import OutputOptionsDialog
 from gui.widgets.progress_dialog import ProgressDialog
 from gui.widgets.lyrics_timing_panel import LyricsTimingPanel
-from gui.workers import SeparationWorker
+from gui.widgets.preview_player import PreviewPlayer
+from gui.workers import SeparationWorker, RenderWorker
 
 logger = logging.getLogger(__name__)
 
@@ -70,10 +73,18 @@ class MainWindow(QMainWindow):
         edit_btn.clicked.connect(self.on_edit_lyrics)
         self.edit_btn = edit_btn
         button_layout.addWidget(edit_btn)
-        
-        export_btn = QPushButton('3. 匯出影片')
+
+        preview_btn = QPushButton('3. 預覽影片')
+        preview_btn.setMinimumHeight(50)
+        preview_btn.setEnabled(False)
+        preview_btn.clicked.connect(self.on_preview_player)
+        self.preview_btn = preview_btn
+        button_layout.addWidget(preview_btn)
+
+        export_btn = QPushButton('4. 匯出影片')
         export_btn.setMinimumHeight(50)
-        export_btn.setEnabled(False)
+        export_btn.setEnabled(True)
+        export_btn.clicked.connect(self.on_export_video)
         self.export_btn = export_btn
         button_layout.addWidget(export_btn)
         
@@ -98,9 +109,14 @@ class MainWindow(QMainWindow):
 
         # 歌詞編輯頁
         self.lyrics_panel = LyricsTimingPanel(self.project, self)
+        self.lyrics_panel.lrc_loaded.connect(self._on_lrc_loaded)
 
         self.content_stack.addWidget(info_page)
         self.content_stack.addWidget(self.lyrics_panel)
+
+        # 預覽播放器頁
+        self.preview_player = PreviewPlayer(self)
+        self.content_stack.addWidget(self.preview_player)
         self.content_stack.setCurrentIndex(0)
 
         layout.addWidget(self.content_stack)
@@ -136,6 +152,11 @@ class MainWindow(QMainWindow):
         help_menu = menubar.addMenu('說明')
         about_action = help_menu.addAction('關於')
         about_action.triggered.connect(self.on_about)
+
+        # View 菜單
+        view_menu = menubar.addMenu('檢視')
+        preview_action = view_menu.addAction('預覽播放器')
+        preview_action.triggered.connect(self.on_preview_player)
     
     def on_import_video(self):
         """導入影片"""
@@ -170,6 +191,27 @@ class MainWindow(QMainWindow):
         self.content_stack.setCurrentWidget(self.lyrics_panel)
         self.lyrics_panel.setFocus()
         self.statusBar().showMessage('已進入歌詞編輯')
+
+    def on_preview_player(self):
+        """開啟預覽播放器"""
+        self._sync_preview_player()
+        self.content_stack.setCurrentWidget(self.preview_player)
+        self.preview_player.setFocus()
+        self.statusBar().showMessage('已進入預覽播放器')
+
+    def _sync_preview_player(self):
+        """同步預覽播放器資料"""
+        if self.project.video_path:
+            self.preview_player.set_media(self.project.video_path)
+        elif self.project.stems:
+            audio_path = (
+                self.project.stems.get('music')
+                or self.project.stems.get('original')
+            )
+            if audio_path:
+                self.preview_player.set_media(audio_path)
+        if self.project.lrc_timeline:
+            self.preview_player.set_timeline(self.project.lrc_timeline)
     
     def _start_separation(self, video_path: str, output_options: dict):
         """開始音源分離"""
@@ -227,6 +269,103 @@ class MainWindow(QMainWindow):
         )
         
         self.statusBar().showMessage('音訊分離失敗')
+
+    def on_export_video(self):
+        """匯出影片"""
+        if not self.project.video_path:
+            QMessageBox.warning(self, '提醒', '請先匯入影片')
+            return
+        if not self.project.lrc_timeline:
+            QMessageBox.warning(self, '提醒', '請先載入字幕')
+            return
+
+        workflow = KaraokeWorkflow()
+        ass_path = self._ensure_ass_file(workflow)
+        if not ass_path:
+            QMessageBox.warning(self, '提醒', '無法產生 ASS 字幕')
+            return
+
+        audio_path = self._get_default_audio_path()
+        if not audio_path:
+            audio_path, _ = QFileDialog.getOpenFileName(
+                self,
+                "選擇音訊檔案",
+                "",
+                "音訊檔案 (*.wav *.mp3 *.flac *.m4a);;所有檔案 (*)",
+            )
+            if not audio_path:
+                return
+
+        default_output = ""
+        if self.project.project_name:
+            default_output = f"output/{self.project.project_name}/export.mp4"
+
+        output_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "儲存輸出影片",
+            default_output,
+            "MP4 檔案 (*.mp4);;所有檔案 (*)",
+        )
+        if not output_path:
+            return
+
+        self._start_render(self.project.video_path, audio_path, ass_path, output_path)
+
+    def _ensure_ass_file(self, workflow: KaraokeWorkflow) -> str:
+        """確保 ASS 字幕存在"""
+        if self.project.ass_file_path and Path(self.project.ass_file_path).exists():
+            return self.project.ass_file_path
+
+        stems_dir = self.project.stems_dir
+        if not stems_dir:
+            stems_dir = f"output/{self.project.project_name or 'export'}/stems"
+            os.makedirs(stems_dir, exist_ok=True)
+            self.project.stems_dir = stems_dir
+
+        ass_path, ass_content = workflow.ensure_ass_file(self.project.lrc_timeline, stems_dir)
+        self.project.ass_file_path = ass_path
+        self.project.ass_content = ass_content
+        return ass_path
+
+    def _get_default_audio_path(self) -> Optional[str]:
+        """取得預設音訊路徑"""
+        if not self.project.stems:
+            return None
+        return (
+            self.project.stems.get('music')
+            or self.project.stems.get('original')
+        )
+
+    def _start_render(self, video_path: str, audio_path: str, subtitle_path: str, output_path: str):
+        """開始影片輸出"""
+        progress_dialog = ProgressDialog(self, "正在輸出影片...")
+        progress_dialog.show()
+
+        self.render_worker = RenderWorker(video_path, audio_path, subtitle_path, output_path)
+        self.render_worker.progress.connect(progress_dialog.update)
+        self.render_worker.message.connect(
+            lambda msg: progress_dialog.update(progress_dialog.progress_bar.value(), msg)
+        )
+        self.render_worker.finished.connect(
+            lambda out_path: self._on_render_complete(out_path, progress_dialog)
+        )
+        self.render_worker.error.connect(
+            lambda err: self._on_render_error(err, progress_dialog)
+        )
+        self.render_worker.start()
+
+    def _on_render_complete(self, output_path: str, progress_dialog):
+        """輸出完成"""
+        progress_dialog.accept()
+        self.project.output_path = output_path
+        self._update_status()
+        self.statusBar().showMessage('影片輸出完成')
+        QMessageBox.information(self, '完成', f'影片已輸出：\n{output_path}')
+
+    def _on_render_error(self, error: str, progress_dialog):
+        """輸出失敗"""
+        progress_dialog.reject()
+        QMessageBox.critical(self, '錯誤', f'影片輸出失敗：\n{error}')
     
     def on_validation_error(self, error_msg: str):
         """文件驗證錯誤"""
@@ -259,8 +398,21 @@ class MainWindow(QMainWindow):
             info += f"字幕行數：{len(self.project.lrc_timeline.lines)}"
         else:
             info += "字幕行數：無"
-        
+
         self.info_label.setText(info)
+        self._update_action_states()
+
+    def _update_action_states(self):
+        """更新按鈕狀態"""
+        has_video = bool(self.project.video_path)
+        has_lrc = bool(self.project.lrc_timeline)
+        self.preview_btn.setEnabled(has_video and has_lrc)
+
+    def _on_lrc_loaded(self, loaded: bool):
+        """字幕載入狀態變更"""
+        if not loaded:
+            self.project.lrc_timeline = None
+        self._update_action_states()
     
     def on_new_project(self):
         """新建專案"""
