@@ -8,6 +8,8 @@ from .output_options_dialog import OutputOptionsDialog
 from .ruby_edit_dialog import RubyEditDialog
 from .lyrics_timing_panel import LyricsTimingPanel
 from .preview_player import PreviewPlayer
+from .color_group_panel import ColorGroupPanel
+from .color_editor_dialog import ColorEditorDialog
 from .timestamp_editor import TimeStampEditor
 
 __all__ = [
@@ -18,5 +20,7 @@ __all__ = [
     'RubyEditDialog',
     'LyricsTimingPanel',
     'PreviewPlayer',
+    'ColorGroupPanel',
+    'ColorEditorDialog',
     'TimeStampEditor',
 ]

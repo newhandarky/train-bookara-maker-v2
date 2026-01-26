@@ -51,7 +51,8 @@ class LyricsTimingPanel(QWidget):
         # LRC 寫入器
         self.writer = LrcWriter()
         # ASS 轉換器設定
-        self.subtitle_config = SubtitleConfig()
+        project_config = project.subtitle_config if project else None
+        self.subtitle_config = SubtitleConfig.from_dict(project_config)
         # 時間軸
         self.timeline: Optional[LrcTimeline] = None
         # 單字索引列表
@@ -88,6 +89,7 @@ class LyricsTimingPanel(QWidget):
         self._active_line_idx = None
         self._sync_sentence_editor(-1)
         self.lrc_loaded.emit(False)
+        self.set_subtitle_config(project.subtitle_config if project else {})
 
     def _setup_ui(self):
         """建立 UI"""
@@ -166,6 +168,7 @@ class LyricsTimingPanel(QWidget):
         self.editor = LrcLineEditor(self)
         self.editor.line_text_changed.connect(self._on_line_text_changed)
         self.editor.cursor_changed.connect(self._on_cursor_changed)
+        self.editor.set_group_options(self._get_enabled_group_options())
 
         side_panel = QWidget()
         side_layout = QVBoxLayout()
@@ -435,6 +438,24 @@ class LyricsTimingPanel(QWidget):
 
         new_idx = min(line_idx, len(self.timeline.lines) - 1)
         self.editor.set_cursor(new_idx, 0)
+
+    def set_subtitle_config(self, config: dict):
+        """更新字幕設定"""
+        self.subtitle_config = SubtitleConfig.from_dict(config)
+        self.editor.set_group_options(self._get_enabled_group_options())
+
+    def _get_enabled_group_options(self):
+        """取得啟用群組選項（id, name）"""
+        options = {}
+        groups = self.subtitle_config.color_groups or {}
+        for group_id in self.subtitle_config.enabled_groups or []:
+            group = groups.get(group_id, {})
+            options[group_id] = group.get('name', group_id)
+        if not options:
+            for group_id, group in groups.items():
+                options[group_id] = group.get('name', group_id)
+                break
+        return options
 
     def _on_toggle_play(self):
         """播放/暫停"""

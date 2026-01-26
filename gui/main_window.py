@@ -22,6 +22,7 @@ from gui.widgets.output_options_dialog import OutputOptionsDialog
 from gui.widgets.progress_dialog import ProgressDialog
 from gui.widgets.lyrics_timing_panel import LyricsTimingPanel
 from gui.widgets.preview_player import PreviewPlayer
+from gui.widgets.color_group_panel import ColorGroupPanel
 from gui.workers import SeparationWorker, RenderWorker
 
 logger = logging.getLogger(__name__)
@@ -74,14 +75,21 @@ class MainWindow(QMainWindow):
         self.edit_btn = edit_btn
         button_layout.addWidget(edit_btn)
 
-        preview_btn = QPushButton('3. 預覽影片')
+        color_btn = QPushButton('3. 字幕顏色群組')
+        color_btn.setMinimumHeight(50)
+        color_btn.setEnabled(True)
+        color_btn.clicked.connect(self.on_edit_color_groups)
+        self.color_btn = color_btn
+        button_layout.addWidget(color_btn)
+
+        preview_btn = QPushButton('4. 預覽影片')
         preview_btn.setMinimumHeight(50)
         preview_btn.setEnabled(False)
         preview_btn.clicked.connect(self.on_preview_player)
         self.preview_btn = preview_btn
         button_layout.addWidget(preview_btn)
 
-        export_btn = QPushButton('4. 匯出影片')
+        export_btn = QPushButton('5. 匯出影片')
         export_btn.setMinimumHeight(50)
         export_btn.setEnabled(True)
         export_btn.clicked.connect(self.on_export_video)
@@ -113,6 +121,11 @@ class MainWindow(QMainWindow):
 
         self.content_stack.addWidget(info_page)
         self.content_stack.addWidget(self.lyrics_panel)
+
+        # 字幕顏色群組頁
+        self.color_group_panel = ColorGroupPanel(self.project, self)
+        self.color_group_panel.config_changed.connect(self._on_subtitle_config_changed)
+        self.content_stack.addWidget(self.color_group_panel)
 
         # 預覽播放器頁
         self.preview_player = PreviewPlayer(self)
@@ -192,6 +205,12 @@ class MainWindow(QMainWindow):
         self.lyrics_panel.setFocus()
         self.statusBar().showMessage('已進入歌詞編輯')
 
+    def on_edit_color_groups(self):
+        """編輯字幕顏色群組"""
+        self.content_stack.setCurrentWidget(self.color_group_panel)
+        self.color_group_panel.setFocus()
+        self.statusBar().showMessage('已進入顏色群組設定')
+
     def on_preview_player(self):
         """開啟預覽播放器"""
         self._sync_preview_player()
@@ -212,6 +231,11 @@ class MainWindow(QMainWindow):
                 self.preview_player.set_media(audio_path)
         if self.project.lrc_timeline:
             self.preview_player.set_timeline(self.project.lrc_timeline)
+
+    def _on_subtitle_config_changed(self, config: dict):
+        """字幕設定變更"""
+        self.project.subtitle_config = config
+        self.lyrics_panel.set_subtitle_config(config)
     
     def _start_separation(self, video_path: str, output_options: dict):
         """開始音源分離"""
@@ -279,7 +303,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, '提醒', '請先載入字幕')
             return
 
-        workflow = KaraokeWorkflow()
+        workflow = KaraokeWorkflow(self.project.subtitle_config)
         ass_path = self._ensure_ass_file(workflow)
         if not ass_path:
             QMessageBox.warning(self, '提醒', '無法產生 ASS 字幕')
@@ -418,6 +442,7 @@ class MainWindow(QMainWindow):
         """新建專案"""
         self.project = KaraokeProject()
         self.lyrics_panel.set_project(self.project)
+        self.color_group_panel.set_project(self.project)
         self.content_stack.setCurrentIndex(0)
         self.edit_btn.setEnabled(True)
         self.export_btn.setEnabled(False)

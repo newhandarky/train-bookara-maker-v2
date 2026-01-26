@@ -13,8 +13,8 @@ from core.lrc import LrcTimeline
 class KaraokeWorkflow:
     """專案流程管理"""
 
-    def __init__(self):
-        self.subtitle_config = SubtitleConfig()
+    def __init__(self, subtitle_config: Optional[dict] = None):
+        self.subtitle_config = SubtitleConfig.from_dict(subtitle_config) if subtitle_config else SubtitleConfig()
         self.renderer = VideoRenderer()
 
     def ensure_ass_file(self, timeline: LrcTimeline, output_dir: str) -> Tuple[str, str]:

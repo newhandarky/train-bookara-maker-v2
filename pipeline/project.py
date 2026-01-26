@@ -10,6 +10,7 @@ import logging
 from pathlib import Path
 
 from core.lrc import LrcTimeline
+from core.subtitle import SubtitleConfig
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +35,9 @@ class KaraokeProject:
     # ASS 狀態
     ass_content: Optional[str] = None
     ass_file_path: Optional[str] = None
+
+    # 字幕樣式設定
+    subtitle_config: dict = field(default_factory=lambda: SubtitleConfig().to_dict())
     
     # 輸出
     output_path: Optional[str] = None
@@ -69,6 +73,7 @@ class KaraokeProject:
             'lrc_file_path': self.lrc_file_path,
             'ass_file_path': self.ass_file_path,
             'output_path': self.output_path,
+            'subtitle_config': self.subtitle_config,
             'created_at': self.created_at,
             'updated_at': self.updated_at,
         }

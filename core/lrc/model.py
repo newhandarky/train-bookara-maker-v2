@@ -33,6 +33,7 @@ class LrcLine:
     """一行歌詞，包含多個詞（或字）"""
 
     words: List[LrcWord] = field(default_factory=list)  # 詞列表
+    group_id: str = 'A'  # 顏色群組
 
     @property
     def text(self) -> str:

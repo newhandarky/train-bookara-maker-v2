@@ -18,6 +18,7 @@ from PyQt5.QtWidgets import (
     QTableWidgetItem,
     QLabel,
     QHeaderView,
+    QComboBox,
 )
 
 from core.lrc import LrcLine, LrcParser, LrcTimeline, LrcWord, RubyPair
@@ -45,6 +46,8 @@ class LrcLineEditor(QTableWidget):
         # 游標位置
         self._current_line_idx = 0  # 目前行
         self._current_word_idx = 0  # 目前字
+        # 群組選項
+        self._group_options = [('A', 'A'), ('B', 'B')]
         # 初始化 UI
         self._setup_ui()
         # 監聽文字變更
@@ -54,10 +57,11 @@ class LrcLineEditor(QTableWidget):
     def _setup_ui(self):
         """設定表格欄位"""
         self.setFocusPolicy(Qt.StrongFocus)
-        self.setColumnCount(3)
-        self.setHorizontalHeaderLabels(['行', '時間', '顯示'])
+        self.setColumnCount(4)
+        self.setHorizontalHeaderLabels(['行', '時間', '顯示', '群組'])
         self.setColumnWidth(0, 60)
         self.setColumnWidth(1, 140)
+        self.setColumnWidth(3, 80)
 
         header = self.horizontalHeader()
         header.setSectionResizeMode(2, QHeaderView.Stretch)
@@ -115,6 +119,10 @@ class LrcLineEditor(QTableWidget):
                 partial(self._on_display_link_clicked, line_idx),
             )
             self.setCellWidget(row, 2, display_label)
+
+            # 群組選擇
+            group_combo = self._build_group_combo(line_idx, line.group_id)
+            self.setCellWidget(row, 3, group_combo)
 
         self._is_updating = False
         self._ensure_cursor()
@@ -206,6 +214,50 @@ class LrcLineEditor(QTableWidget):
         words = self._parser.parse_txt_line(text, auto_ruby=True)
         return [LrcWord(w.text, w.start_time, w.end_time, w.ruby_pair) for w in words]
 
+    def _build_group_combo(self, line_idx: int, group_id: str):
+        """建立群組下拉"""
+        combo = QComboBox()
+        options = self._group_options or [('A', 'A')]
+        for option_id, option_name in options:
+            combo.addItem(option_name, option_id)
+        option_ids = [option_id for option_id, _ in options]
+        current = group_id if group_id in option_ids else option_ids[0]
+        if group_id != current:
+            self.timeline.lines[line_idx].group_id = current
+        combo.setCurrentIndex(option_ids.index(current))
+        combo.currentIndexChanged.connect(
+            lambda _index, li=line_idx, cb=combo: self._on_group_changed(li, cb.currentData())
+        )
+        return combo
+
+    def _on_group_changed(self, line_idx: int, group_id: str):
+        """群組變更"""
+        if not self.timeline:
+            return
+        if line_idx < 0 or line_idx >= len(self.timeline.lines):
+            return
+        self.timeline.lines[line_idx].group_id = group_id
+
+    def set_group_options(self, options):
+        """設定群組選項"""
+        self._group_options = self._normalize_group_options(options)
+        if self.timeline:
+            self.refresh()
+
+    def _normalize_group_options(self, options):
+        """統一群組選項格式"""
+        if not options:
+            return [('A', 'A')]
+        if isinstance(options, dict):
+            return [(group_id, name or group_id) for group_id, name in options.items()]
+        normalized = []
+        for item in options:
+            if isinstance(item, (list, tuple)) and len(item) >= 2:
+                normalized.append((item[0], item[1]))
+            elif isinstance(item, str):
+                normalized.append((item, item))
+        return normalized or [('A', 'A')]
+
     def set_line_text(self, line_idx: int, text: str):
         """更新指定行的句子內容"""
         if not self.timeline:
@@ -278,7 +330,7 @@ class LrcLineEditor(QTableWidget):
         highlight_idx = self._current_word_idx if line_idx == self._current_line_idx else None
 
         base_style = "color:#f5f5f5;"
-        highlight_style = "color:#ffd54f; font-weight:600;"
+        highlight_style = "color:#7CFC00; font-weight:600;"
 
         for index, word in enumerate(line.words):
             ruby_text = word.ruby_pair.ruby if word.ruby_pair else ''
